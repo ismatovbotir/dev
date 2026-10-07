@@ -7,13 +7,11 @@ use App\Http\Requests\Admin\UpdatePasswordRequest;
 use App\Http\Requests\Admin\UpdatePlanExamplesRequest;
 use App\Http\Requests\Admin\UpdateProfileRequest;
 use App\Models\Setting;
-use App\Services\Telegram\TelegramClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-use Throwable;
 
 class SettingsController extends Controller
 {
@@ -70,20 +68,6 @@ class SettingsController extends Controller
         $request->user()->update(['password' => $request->validated('password')]);
 
         return back()->with('status', 'Password updated.');
-    }
-
-    public function checkBot(TelegramClient $telegram): RedirectResponse
-    {
-        try {
-            $bot = $telegram->call('getMe');
-            $webhook = $telegram->call('getWebhookInfo');
-        } catch (Throwable $exception) {
-            return back()->with('error', 'Telegram check failed: '.$exception->getMessage());
-        }
-
-        $mode = filled($webhook['url'] ?? null) ? 'webhook '.$webhook['url'] : 'long polling (no webhook set)';
-
-        return back()->with('status', "Connected as @{$bot['username']} · receiving updates via {$mode}.");
     }
 
     /**

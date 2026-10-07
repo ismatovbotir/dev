@@ -174,6 +174,9 @@ class TelegramClient
             throw new RuntimeException("Telegram {$method} failed: ".($payload['description'] ?? 'no response'));
         }
 
-        return $payload['result'] ?? [];
+        $result = $payload['result'] ?? [];
+
+        // Methods such as setWebhook and deleteWebhook answer with a bare `true`.
+        return is_array($result) ? $result : ['value' => $result];
     }
 }
