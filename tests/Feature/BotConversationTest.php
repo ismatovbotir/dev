@@ -89,10 +89,10 @@ class BotConversationTest extends TestCase
         $this->send('+998 90 123-45-67');
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'sendMessage')
-            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === 'Small shop'
+            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === 'Up to 100 m²'
             && str_contains($request['text'], 'retail point planning'));
 
-        $this->send('Supermarket');
+        $this->send('100-400 m²');
         $this->send('Korzinka');
         $this->handleUpdate(['message' => $this->message(['location' => ['latitude' => 41.31, 'longitude' => 69.24]])]);
         $this->handleUpdate(['message' => $this->message(['photo' => [['file_id' => 'small'], ['file_id' => 'big']]])]);
@@ -101,7 +101,7 @@ class BotConversationTest extends TestCase
         $this->assertSame(0, ShopRequest::count());
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'sendMessage')
             && str_contains($request['text'], '+998 90 123 45 67')
-            && str_contains($request['text'], 'Supermarket')
+            && str_contains($request['text'], '100-400 m²')
             && str_contains($request['text'], 'File received'));
 
         $this->tap('confirm:yes');
@@ -114,7 +114,7 @@ class BotConversationTest extends TestCase
         $this->assertSame(RequestStatus::New, $shopRequest->status);
         $this->assertSame(ConversationState::Idle, $this->client()->state);
 
-        $this->assertSame('Supermarket', $shopRequest->answers[0]['value']);
+        $this->assertSame('100-400 m²', $shopRequest->answers[0]['value']);
         $this->assertSame("plans/{$shopRequest->id}/plan.jpg", $shopRequest->answers[1]['file']);
         Storage::disk('local')->assertExists("plans/{$shopRequest->id}/plan.jpg");
 
@@ -130,9 +130,9 @@ class BotConversationTest extends TestCase
         $this->send('+998901234567');
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'sendMessage')
-            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === "Kichik do'kon");
+            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === '100 m2 gacha');
 
-        $this->send('Ombor');
+        $this->send('2 000 m2 dan katta');
         $this->send('Makro');
         $this->send('⏭ O‘tkazib yuborish');
         $this->handleUpdate(['message' => $this->message(['document' => [
@@ -141,7 +141,7 @@ class BotConversationTest extends TestCase
         $this->tap('confirm:yes');
 
         $answers = ShopRequest::sole()->answers;
-        $this->assertSame('Warehouse', $answers[0]['value']);
+        $this->assertSame('Over 2,000 m²', $answers[0]['value']);
         $this->assertSame('plan.pdf', $answers[1]['value']);
         $this->assertNull(ShopRequest::sole()->location_text);
     }
@@ -287,7 +287,7 @@ class BotConversationTest extends TestCase
         RegistrationStep::whereIn('key', ['brand', 'location'])->update(['is_active' => false]);
         $this->client(ConversationState::AwaitingStep, [...$this->fullDraft(), '_step' => 'point_type']);
 
-        $this->send('Hypermarket');
+        $this->send('500-1,000 m²');
 
         $this->assertSame('plan', $this->client()->draft['_step']);
     }
@@ -331,7 +331,7 @@ class BotConversationTest extends TestCase
         ShopRequest::factory()->for($client)->create(['name' => 'Ali Valiyev', 'phone' => '+998901234567']);
 
         $this->send('/new');
-        $this->send('Hypermarket');
+        $this->send('500-1,000 m²');
         $this->send('Evos Mart');
         $this->send('⏭ Skip');
         $this->handleUpdate(['message' => $this->message(['photo' => [['file_id' => 'p1']]])]);
@@ -528,6 +528,54 @@ class BotConversationTest extends TestCase
         }
 
         Setting::write(Setting::PLAN_EXAMPLES, $examples);
+    }
+
+    public function test_a_redelivered_update_is_not_processed_twice(): void
+    {
+        $this->client(ConversationState::AwaitingStep, ['_step' => 'name']);
+
+        $update = ['update_id' => 100, 'message' => $this->message(['text' => 'Ali Valiyev'])];
+
+        $this->handleUpdate($update);
+        $this->handleUpdate($update);
+
+        $draft = $this->client()->draft;
+        $this->assertSame('phone', $draft['_step']);
+        $this->assertSame('Ali Valiyev', $draft['name']);
+        $this->assertArrayNotHasKey('phone', $draft);
+        Http::assertNotSent(fn (Request $request) => str_contains((string) ($request['text'] ?? ''), "doesn't look right"));
+    }
+
+    public function test_newer_updates_are_still_processed(): void
+    {
+        $this->client(ConversationState::AwaitingStep, ['_step' => 'name']);
+
+        $this->handleUpdate(['update_id' => 100, 'message' => $this->message(['text' => 'Ali Valiyev'])]);
+        $this->handleUpdate(['update_id' => 101, 'message' => $this->message(['text' => '+998901234567'])]);
+
+        $this->assertSame('+998901234567', $this->client()->draft['phone']);
+        $this->assertSame(101, $this->client()->last_update_id);
+    }
+
+    public function test_updates_from_a_different_bot_with_much_lower_ids_are_accepted(): void
+    {
+        $this->client(ConversationState::AwaitingStep, ['_step' => 'name'])->update(['last_update_id' => 900_000_000]);
+
+        $this->handleUpdate(['update_id' => 42, 'message' => $this->message(['text' => 'Ali Valiyev'])]);
+
+        $this->assertSame('phone', $this->client()->draft['_step']);
+    }
+
+    public function test_a_redelivered_button_tap_is_ignored(): void
+    {
+        $this->client(ConversationState::AwaitingConfirmation, $this->fullDraft());
+
+        $tap = ['update_id' => 7, 'callback_query' => ['id' => '1', 'data' => 'confirm:no', 'message' => ['message_id' => 10, 'chat' => ['id' => self::CHAT_ID]]]];
+        $this->handleUpdate($tap);
+        $this->send('Ali Valiyev');
+        $this->handleUpdate($tap);
+
+        $this->assertSame('phone', $this->client()->draft['_step']);
     }
 
     private function fakeTelegram(): void

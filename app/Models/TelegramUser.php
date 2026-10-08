@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['chat_id', 'username', 'first_name', 'language', 'state', 'draft', 'profile'])]
+#[Fillable(['chat_id', 'username', 'first_name', 'language', 'state', 'draft', 'profile', 'last_update_id'])]
 class TelegramUser extends Model
 {
     /** @use HasFactory<TelegramUserFactory> */

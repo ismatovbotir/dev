@@ -18,6 +18,8 @@ class BotHandler
 {
     private const CORE_FIELDS = ['phone', 'name', 'brand'];
 
+    private const REPLAY_WINDOW = 1000;
+
     public function __construct(private TelegramClient $telegram) {}
 
     /**
@@ -27,8 +29,10 @@ class BotHandler
      */
     public function handle(array $update): void
     {
+        $updateId = $update['update_id'] ?? null;
+
         if (isset($update['callback_query'])) {
-            $this->handleCallback($update['callback_query']);
+            $this->handleCallback($update['callback_query'], $updateId);
 
             return;
         }
@@ -47,6 +51,10 @@ class BotHandler
                 'state' => ConversationState::Idle,
             ],
         );
+
+        if ($this->isReplay($user, $updateId)) {
+            return;
+        }
 
         $text = trim((string) ($message['text'] ?? ''));
 
@@ -79,9 +87,32 @@ class BotHandler
     }
 
     /**
+     * Telegram redelivers an update when it was not acknowledged (a poller restart, a webhook retry).
+     * Handling it twice would feed the same answer into the next question, so repeats are skipped.
+     * Update ids only grow per bot, and a replay is never far behind the last one seen, so ids that are
+     * far lower (a different bot token) are accepted.
+     */
+    private function isReplay(TelegramUser $user, mixed $updateId): bool
+    {
+        if (! is_int($updateId)) {
+            return false;
+        }
+
+        $last = $user->last_update_id;
+
+        if ($last !== null && $updateId <= $last && $last - $updateId < self::REPLAY_WINDOW) {
+            return true;
+        }
+
+        $user->update(['last_update_id' => $updateId]);
+
+        return false;
+    }
+
+    /**
      * @param  array<string, mixed>  $callback
      */
-    private function handleCallback(array $callback): void
+    private function handleCallback(array $callback, mixed $updateId = null): void
     {
         $chatId = $callback['message']['chat']['id'] ?? null;
         $data = (string) ($callback['data'] ?? '');
@@ -90,7 +121,7 @@ class BotHandler
 
         $user = $chatId === null ? null : TelegramUser::where('chat_id', $chatId)->first();
 
-        if ($user === null) {
+        if ($user === null || $this->isReplay($user, $updateId)) {
             return;
         }
 
